@@ -3,8 +3,10 @@ using System.Data;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using QuizService.Model;
-using QuizService.Model.Domain;
 using System.Linq;
+using System.Threading.Tasks;
+using MediatR;
+using QuizService.Queries;
 
 namespace QuizService.Controllers;
 
@@ -12,18 +14,44 @@ namespace QuizService.Controllers;
 public class QuizController : Controller
 {
     private readonly IDbConnection _connection;
+    private readonly IMediator _mediator;
 
-    public QuizController(IDbConnection connection)
+
+    // TODO
+    // All 'computation'/'logic' would have been in a separate DLL,
+    // a Domain DLL, where it would have been reference free (pure C#) in order to test the core of the project
+    // without impediments. Some Domain driven approach is what I prefer.
+
+    // TODO
+    // The changes I've made with MediatR and Queries and QueryHandlers reflect my CQRS preference,
+    // and only one layer (the handlers) between the API and the Domain layer. 
+    // Put, Post and Update would have been placed in Commands and Command handlers.
+
+    // TODO
+    // A remark: some DB factory would have been made in order to instantiate SqlConnections, but 
+    // I did not make one, as you said, this is only a short challenge meant to be done in a couple of hours.
+    // Also, I haven't dealt with Sqllite much, so I decided that using your Singleton was the easiest approach.
+
+
+    // TODO 
+    // Modeling is something I see as the most important part of development, so in a more real-world-like app,
+    // I'd focus on that the most. Just a heads up, if we get to talk about this in the future.
+
+    // TODO
+    // API, Service/Infrastructure and Domain levels are the levels I would have separated QuizService into, at the very least.
+
+    public QuizController(IDbConnection connection, IMediator mediator)
     {
         _connection = connection;
+        _mediator = mediator;
     }
 
     // GET api/quizzes
     [HttpGet]
-    public IEnumerable<QuizResponseModel> Get()
+    public async Task<IEnumerable<QuizResponseModel>> Get()
     {
-        const string sql = "SELECT * FROM Quiz;";
-        var quizzes = _connection.Query<Quiz>(sql);
+        var quizzes = await _mediator.Send(new GetAllQuizzesQuery());
+
         return quizzes.Select(quiz =>
             new QuizResponseModel
             {
@@ -34,22 +62,17 @@ public class QuizController : Controller
 
     // GET api/quizzes/5
     [HttpGet("{id}")]
-    public object Get(int id)
+    public async Task<object> Get(int id)
     {
-        const string quizSql = "SELECT * FROM Quiz WHERE Id = @Id;";
-        var quiz = _connection.QuerySingle<Quiz>(quizSql, new {Id = id});
+        var quiz = await _mediator.Send(new GetQuizByIdQuery(id));
+
         if (quiz == null)
             return NotFound();
-        const string questionsSql = "SELECT * FROM Question WHERE QuizId = @QuizId;";
-        var questions = _connection.Query<Question>(questionsSql, new {QuizId = id});
-        const string answersSql = "SELECT a.Id, a.Text, a.QuestionId FROM Answer a INNER JOIN Question q ON a.QuestionId = q.Id WHERE q.QuizId = @QuizId;";
-        var answers = _connection.Query<Answer>(answersSql, new {QuizId = id})
-            .Aggregate(new Dictionary<int, IList<Answer>>(), (dict, answer) => {
-                if (!dict.ContainsKey(answer.QuestionId))
-                    dict.Add(answer.QuestionId, new List<Answer>());
-                dict[answer.QuestionId].Add(answer);
-                return dict;
-            });
+
+        var questions = await _mediator.Send(new GetQuestionsByIdQuery(id));
+
+        var answers = await _mediator.Send(new GetAnswersByQuizIdQuery(id));
+
         return new QuizResponseModel
         {
             Id = quiz.Id,
@@ -166,5 +189,17 @@ public class QuizController : Controller
         const string sql = "DELETE FROM Answer WHERE Id = @AnswerId";
         _connection.ExecuteScalar(sql, new {AnswerId = aid});
         return NoContent();
+    }
+
+    [HttpPost]
+    [Route("{id}/questions/{qid}/answers/{aid}/check")]
+    public async Task<IActionResult> TakeQuiz(int id, int qid, int aid)
+    {
+        var answers = await _mediator.Send(new GetAnswersByQuizIdQuery(id));
+
+        if (answers[id].Any(x => x.QuestionId == qid && x.Id == aid))
+            return Ok();
+
+        return NotFound();
     }
 }

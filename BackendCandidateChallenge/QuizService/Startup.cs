@@ -2,12 +2,14 @@
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using QuizService.Repositories;
 
 namespace QuizService;
 
@@ -26,6 +28,16 @@ public class Startup
         services.AddMvc();
         services.AddSingleton(InitializeDb());
         services.AddControllers();
+        services.AddSingleton(_ => Configuration);
+
+        // Add Mediator
+        services.AddMediatR(typeof(Startup));
+
+        // Register repos
+        services.AddScoped(typeof(IBasicRepository<>), typeof(BasicRepository<>));
+        services.AddScoped<IQuizRepository, QuizRepository>();
+        services.AddScoped<IQuestionRepository, QuestionRepository>();
+        services.AddScoped<IAnswersRepository, AnswersRepository>();
     }
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
